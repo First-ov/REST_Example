@@ -16,7 +16,7 @@ services:
       - '3306:3306'
     environment:
       MYSQL_DATABASE: 'db_django'
-      MYSQL_USER: 'root'
+      MYSQL_USER: 'paov'
       MYSQL_PASSWORD: 'password'
       MYSQL_ROOT_PASSWORD: 'password'
     restart: always
