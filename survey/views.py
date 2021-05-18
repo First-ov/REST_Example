@@ -3,13 +3,26 @@ from rest_framework.decorators import api_view,authentication_classes,permission
 from rest_framework.authentication import SessionAuthentication, BasicAuthentication
 from rest_framework.permissions import IsAuthenticated,IsAdminUser
 from rest_framework.response import Response
-from survey.models import Survey,Question,Answer
+from survey.models import Survey,Question,Answer,SurveyUser
 from datetime import datetime
 
 
 surveyparams=['id','title','start','finish', 'description']
 questionparams=['id','survey','text','type']
 answerparams=['text','user','question']
+
+def GetUser(request):
+    if not request.user.is_authenticated:
+        # create anonymous user
+        request.session.save()
+        username = str(request.session.session_key) + '@dummy.com'
+        try:
+            user = SurveyUser.objects.create(username=username)
+        except:
+            user = SurveyUser.objects.get(username=username)
+        return user.username
+    else:
+        request.user.id
 
 
 class SurveySerializer(serializers.ModelSerializer):
@@ -25,10 +38,14 @@ class AnswerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Answer
         fields = answerparams
+class AnswerWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Answer
+        fields = answerparams
 
 
 @api_view(['GET','POST', 'UPDATE', 'DELETE'])
-@authentication_classes([BasicAuthentication])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def AdminSurveyView(request):
     if request.method == 'GET':#все опросы
@@ -81,7 +98,7 @@ def AdminSurveyView(request):
 
 
 @api_view(['GET','POST', 'UPDATE', 'DELETE'])
-@authentication_classes([BasicAuthentication])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def AdminQuestionView(request):
     if request.method == 'GET':
@@ -97,7 +114,7 @@ def AdminQuestionView(request):
             return Response(data, status=status.HTTP_200_OK)
     if request.method == 'POST':
         for each in request.data:#добавление данных полей из параметра запроса
-            if each not in surveyparams:
+            if each not in questionparams:
                  return Response('поле не существует', status=status.HTTP_400_BAD_REQUEST)#поле не существует
         serializer = QuestionSerializer(data=request.data)
         if serializer.is_valid():  # проверка JSON объекта
@@ -135,8 +152,8 @@ def AdminQuestionView(request):
 
 
 @api_view(['GET'])#только актуальные
-@authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])
+@permission_classes([])
 def SurveyView(request):
     if request.method == 'GET':
         surveys = Survey.objects.all().filter(finish__gte=datetime.now(),
@@ -147,8 +164,8 @@ def SurveyView(request):
 
 
 @api_view(['GET'])
-@authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])
+@permission_classes([])
 def QuestionView(request):
     if request.method == 'GET':
         data = request.data
@@ -165,12 +182,13 @@ def QuestionView(request):
 
 
 @api_view(['GET'])
-@authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])
+@permission_classes([])
 def MyAnswersView(request):
+    user = GetUser(request)
     if request.method == 'GET':
             answers = Answer.objects.all().filter(
-                user=request.user.id)  # выбор всех объектов
+                user=user)  # выбор всех объектов
             surveys=[]
             data={}
             for each in answers:
@@ -180,33 +198,30 @@ def MyAnswersView(request):
                 serializer = AnswerSerializer(answers.filter(question__survey=each), many=True)
                 data[each] = {'answers': serializer.data}
             return Response(data,status=status.HTTP_200_OK)
-
-
 @api_view(['POST'])
-@authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])
+@permission_classes([])
 def SendAnswerView(request):
+    user = GetUser(request)
     if request.method == 'POST':
         data=request.data
+        data["user"]=user
         if 'text' in data and 'question' in data:
-            if Answer.objects.filter(question=data['question'],user=request.user.id).count():
-              serializer = AnswerSerializer(Answer.objects.filter(question=data['question'],user=request.user.id)[0],
-                                            data={
-                                        "text":request.data['text'],
-                                        "question":request.data['question'],
-                                        "user":request.user.id},partial=True)
-              if serializer.is_valid():  # проверка JSON объекта
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
-              return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            if Answer.objects.filter(question=data['question'],user=user).count():
+                serializer = AnswerWriteSerializer(Answer.objects.filter(question=data['question'],user=user)[0],
+                                                   data=request.data,partial=True)
+                if serializer.is_valid():  # проверка JSON объекта
+                  serializer.save()
+                  return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
+                else:
+                  return Response(status=status.HTTP_400_BAD_REQUEST)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             else:
-                serializer = AnswerSerializer(data={
-                                                  "text": request.data['text'],
-                                                  "question": request.data['question'],
-                                                  "user": request.user.id})
+                serializer = AnswerWriteSerializer(data=request.data)
                 if serializer.is_valid():  # проверка JSON объекта
                     serializer.save()
-                    return Response(serializer.data, status=status.HTTP_201_CREATED)
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    return Response('ответ принят', status=status.HTTP_201_CREATED)
+                else:
+                    return Response('', status=status.HTTP_400_BAD_REQUEST)
         else:
           return Response(status=status.HTTP_400_BAD_REQUEST)
